@@ -193,9 +193,29 @@ def call_anthropic(
         client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
         # response.usage contains input_tokens and output_tokens
     """
-    # TODO: Initialize Anthropic client, create message, measure latency,
-    #       extract content text and usage statistics, and return the tuple.
-    raise NotImplementedError("Implement call_anthropic")
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+    start = time.time()
+    # Use messages.create to match test mocking
+    response = client.messages.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+    latency = time.time() - start
+
+    # Extract text and usage
+    # Tests expect response.content[0].text
+    response_text = response.content[0].text
+    usage = {
+        "input_tokens": response.usage.input_tokens,
+        "output_tokens": response.usage.output_tokens,
+    }
+
+    return response_text, latency, usage
 
 
 # ---------------------------------------------------------------------------
@@ -217,13 +237,44 @@ def compare_models(prompt: str) -> dict:
             - "gpt4o_mini": { "response": str, "latency": float, "cost": float, "input_tokens": int, "output_tokens": int }
             - "gemini_flash": { "response": str, "latency": float, "cost": float, "input_tokens": int, "output_tokens": int }
     """
-    # TODO: Call call_openai with default gpt-4o model
-    # TODO: Call call_openai with gpt-4o-mini model
-    # TODO: Call call_gemini with default gemini-2.5-flash model
-    # TODO: Calculate costs exactly based on input and output token counts using PRICING_1M_TOKENS
-    #       Formula: Cost = (input_tokens * input_rate_per_1M + output_tokens * output_rate_per_1M) / 1,000,000
-    # TODO: Assemble and return the comparison dictionary.
-    raise NotImplementedError("Implement compare_models")
+    # Call models
+    resp1_text, resp1_latency, resp1_usage = call_openai(prompt, model=OPENAI_MODEL)
+    resp2_text, resp2_latency, resp2_usage = call_openai(prompt, model=OPENAI_MINI_MODEL)
+    resp3_text, resp3_latency, resp3_usage = call_gemini(prompt, model=GEMINI_MODEL)
+
+    def calc_cost(model_key: str, input_tokens: int, output_tokens: int) -> float:
+        rates = PRICING_1M_TOKENS[model_key]
+        return (input_tokens * rates["input"] + output_tokens * rates["output"]) / 1_000_000
+
+    gpt4o_cost = calc_cost("gpt-4o", resp1_usage["input_tokens"], resp1_usage["output_tokens"])
+    gpt4o_mini_cost = calc_cost("gpt-4o-mini", resp2_usage["input_tokens"], resp2_usage["output_tokens"])
+    gemini_cost = calc_cost("gemini-2.5-flash", resp3_usage["input_tokens"], resp3_usage["output_tokens"])
+
+    result = {
+        "gpt4o": {
+            "response": resp1_text,
+            "latency": resp1_latency,
+            "cost": gpt4o_cost,
+            "input_tokens": resp1_usage["input_tokens"],
+            "output_tokens": resp1_usage["output_tokens"],
+        },
+        "gpt4o_mini": {
+            "response": resp2_text,
+            "latency": resp2_latency,
+            "cost": gpt4o_mini_cost,
+            "input_tokens": resp2_usage["input_tokens"],
+            "output_tokens": resp2_usage["output_tokens"],
+        },
+        "gemini_flash": {
+            "response": resp3_text,
+            "latency": resp3_latency,
+            "cost": gemini_cost,
+            "input_tokens": resp3_usage["input_tokens"],
+            "output_tokens": resp3_usage["output_tokens"],
+        },
+    }
+
+    return result
 
 
 # ---------------------------------------------------------------------------
