@@ -67,7 +67,27 @@ def call_openai(
     """
     # TODO: Import OpenAI, instantiate client, call chat.completions.create with parameters,
     #       measure execution start/end time, extract text and token usage, and return them.
-    raise NotImplementedError("Implement call_openai")
+    from openai import OpenAI
+
+    start = time.time()
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+    )
+
+    latency = time.time() - start
+    response_text = response.choices[0].message.content
+    usage = {
+        "input_tokens": response.usage.prompt_tokens,
+        "output_tokens": response.usage.completion_tokens,
+    }
+
+    return response_text, latency, usage
 
 
 # ---------------------------------------------------------------------------
@@ -113,9 +133,32 @@ def call_gemini(
         Ensure your usage dictionary extracts 'input_tokens' and 'output_tokens' 
         from the response metadata (e.g. response.usage_metadata).
     """
-    # TODO: Initialize Gemini client, set config parameters, call generate_content,
-    #       measure latency, extract response text and usage metadata, and return the tuple.
-    raise NotImplementedError("Implement call_gemini")
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+    config = types.GenerateContentConfig(
+        temperature=temperature,
+        top_p=top_p,
+        max_output_tokens=max_tokens,
+    )
+
+    start = time.time()
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=config,
+    )
+    latency = time.time() - start
+
+    response_text = response.text
+    usage = {
+        "input_tokens": response.usage_metadata.prompt_token_count,
+        "output_tokens": response.usage_metadata.candidates_token_count,
+    }
+
+    return response_text, latency, usage
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +243,56 @@ def streaming_chatbot() -> None:
         - Check how to stream responses using client.chats or model.generate_content(..., stream=True).
         - Keep history limited to the last 3 turns to optimize context window and costs.
     """
-    # TODO: Setup interactive session, prompt user for input, stream response, and update history.
-    raise NotImplementedError("Implement streaming_chatbot")
+    try:
+        from google import genai
+    except Exception:
+        print("Google GenAI SDK not available. Install google-genai to use streaming.")
+        return
+
+    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+
+    history: list[dict] = []
+
+    print("Starting Gemini streaming chatbot. Type 'quit' or 'exit' to stop.")
+    while True:
+        try:
+            user_input = input("You: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nExiting chat.")
+            break
+
+        if not user_input:
+            continue
+
+        if user_input.strip().lower() in ("quit", "exit"):
+            print("Exiting chat.")
+            break
+
+        history.append({"role": "user", "content": user_input})
+
+        formatted_history = "\n".join(
+            f"{turn['role']}: {turn['content']}" for turn in history
+        )
+
+        try:
+            response_stream = client.models.generate_content_stream(
+                model=GEMINI_MODEL,
+                contents=formatted_history,
+            )
+
+            assistant_text = ""
+            for chunk in response_stream:
+                text = getattr(chunk, "text", str(chunk))
+                print(text, end="", flush=True)
+                assistant_text += text
+            print()
+
+            history.append({"role": "assistant", "content": assistant_text})
+            history = history[-6:]
+
+        except Exception as e:
+            print(f"\n[Error streaming response] {e}")
+            continue
 
 
 # ---------------------------------------------------------------------------
